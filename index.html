@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>이미지 16:9 일괄 변환 웹앱</title>
+  <style>
+    body { font-family: 'Inter', sans-serif; background: #f5f5f7; color: #222; padding: 30px; max-width: 700px; margin: auto; }
+    h1 { color: #007aff; }
+    .file-zone { border: 2px dashed #d2d2d7; border-radius: 12px; padding: 40px; text-align: center; margin-bottom: 30px; transition: border-color 0.3s ease; }
+    .file-zone.highlight { border-color: #007aff; background-color: #e6f7ff; } /* 드래그 오버 시 하이라이트 효과 */
+    .output { margin-top: 30px; text-align: left; }
+    .preview-wrap { display: flex; flex-wrap: wrap; gap: 24px; justify-content: center; }
+    .preview-box { background: #fff; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.07); padding:14px 10px; margin-bottom: 24px; text-align: center; min-width: 260px; position: relative; } /* 삭제 버튼을 위해 relative 추가 */
+    .preview-title { font-size: 0.95rem; color: #888; margin-bottom: 8px;}
+    canvas { background: #fff; border-radius: 6px; max-width: 100%; height: auto; display: block; margin: 0 auto; }
+    button { background: #007aff; color: white; border: none; padding: 8px 14px; border-radius: 8px; font-size: 1rem; cursor: pointer; } /* margin-top 제거 */
+    button:disabled { background: #86868b; cursor: not-allowed; }
+    #errMsg { color: #e53935; margin-top:12px;}
+    .delete-btn {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: #e53935;
+      color: white;
+      border: none;
+      border-radius: 50%;
+      width: 24px;
+      height: 24px;
+      font-size: 0.8rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      line-height: 1; /* 텍스트 중앙 정렬 */
+    }
+    .delete-btn:hover {
+      background: #c62828;
+    }
+    /* 버튼 그룹 내 여백 조정 */
+    .button-group button {
+        margin: 5px; /* 버튼 간의 간격 조정 */
+    }
+    .clear-all-btn {
+        background: #dc3545; /* 빨간색 계열 */
+    }
+    .clear-all-btn:hover {
+        background: #c82333;
+    }
+    .download-all-btn {
+        background: #28a745; /* 초록색 계열 */
+    }
+    .download-all-btn:hover {
+        background: #218838;
+    }
+    .download-zip-btn { /* ZIP 버튼 클래스명 통일 및 색상 유지 */
+        background: #800080; /* 보라색 계열 */
+    }
+    .download-zip-btn:hover {
+        background: #6a0dad;
+    }
+    .info-display {
+        margin-top: 20px;
+        font-size: 0.9rem;
+        color: #555;
+    }
+    .info-display span {
+        font-weight: bold;
+        color: #007aff;
+    }
+    .loading-indicator {
+        display: none; /* 기본적으로 숨김 */
+        margin-top: 15px;
+        color: #007aff;
+        font-weight: bold;
+    }
+
+    /* 모바일 반응형 */
+    @media (max-width: 600px) {
+      body { padding: 15px; }
+      .file-zone { padding: 20px; }
+      .preview-wrap { gap: 15px; }
+      .preview-box { min-width: 100%; }
+      .button-group {
+        flex-direction: column;
+        align-items: center;
+      }
+      .button-group button {
+        margin-left: 0;
+        margin-top: 8px; /* 모바일에서 버튼 간 위아래 여백 */
+        width: 100%; /* 모바일에서 버튼 전체 너비 */
+        max-width: 250px; /* 너무 길어지지 않게 최대 너비 설정 */
+      }
+    }
+  </style>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- JSZip 라이브러리 추가 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip-utils/0.1.0/jszip-utils.min.js"></script>
+</head>
+<body>
+  <div class="container mx-auto px-4 py-8">
+    <h1 class="text-3xl font-bold text-blue-600 mb-6 text-center">이미지 16:9 일괄 변환</h1>
+    <div class="file-zone bg-white border-dashed border-2 border-gray-300 rounded-xl p-10 mb-8 shadow-sm" id="fileZone">
+      <input type="file" id="fileInput" accept=".jpg,.jpeg,.png" multiple class="block w-full text-sm text-gray-500
+        file:mr-4 file:py-2 file:px-4
+        file:rounded-md file:border-0
+        file:text-sm file:font-semibold
+        file:bg-blue-50 file:text-blue-700
+        hover:file:bg-blue-100 cursor-pointer" />
+      <p class="text-gray-500 mt-4">JPG, JPEG, PNG만 지원 / 최대 500장까지</p>
+      <p class="text-gray-500 text-sm mt-2">또는 파일을 여기에 끌어다 놓으세요.</p>
+      
+      <div id="imageCounts" class="info-display mt-4">
+        업로드된 이미지: <span id="uploadedCountDisplay">0</span>장 | 변환 완료: <span id="convertedCountDisplay">0</span>장
+      </div>
+      <div id="loadingIndicator" class="loading-indicator">
+        이미지 변환 중... 잠시만 기다려주세요.
+      </div>
+
+      <div class="button-group flex justify-center mt-4 flex-wrap">
+        <button id="processBtn" disabled class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg shadow-md transition-all duration-200">
+          16:9로 모두 크롭하기
+        </button>
+        <button id="downloadAllBtn" disabled class="download-all-btn bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg shadow-md transition-all duration-200">
+          모두 다운로드
+        </button>
+        <button id="downloadZipBtn" disabled class="download-zip-btn bg-purple-500 hover:bg-purple-600 text-white font-bold py-2 px-4 rounded-lg shadow-md transition-all duration-200">
+          모두 ZIP으로 다운로드
+        </button>
+        <button id="clearAllBtn" disabled class="clear-all-btn bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-4 rounded-lg shadow-md transition-all duration-200">
+          모두 지우기
+        </button>
+      </div>
+      <div id="errMsg" class="text-red-500 mt-3 font-medium"></div>
+    </div>
+    <div class="output">
+      <div class="preview-wrap grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-6" id="previewWrap"></div>
+    </div>
+  </div>
+
+<script>
+const MAX_IMAGES = 500; // 최대 이미지 업로드 개수
+let selectedFiles = []; // 사용자가 선택한 원본 파일들을 저장하는 배열
+let processedCanvases = []; // 16:9로 크롭된 캔버스들을 저장하는 배열
+let uploadedCount = 0; // 현재 업로드된 이미지 개수
+let convertedCount = 0; // 현재 변환 완료된 이미지 개수
+
+// 파일 선택 및 드래그앤드롭 처리를 위한 공통 함수
+function handleFiles(files) {
+  selectedFiles = Array.from(files); // FileList를 배열로 변환
+  uploadedCount = selectedFiles.length; // 업로드된 이미지 개수 업데이트
+  convertedCount = 0; // 파일 새로 선택 시 변환 완료 개수 초기화
+
+  processedCanvases = []; // 크롭된 캔버스 배열 초기화
+  document.getElementById('previewWrap').innerHTML = ''; // 미리보기 영역 비우기
+  document.getElementById('errMsg').textContent = ''; // 에러 메시지 비우기
+  updateButtonStates(); // 버튼 상태 업데이트
+  updateCountsDisplay(); // 카운트 디스플레이 업데이트
+
+  if (selectedFiles.length === 0) return;
+
+  // 파일 개수 제한 확인
+  if (selectedFiles.length > MAX_IMAGES) {
+    document.getElementById('errMsg').textContent = `최대 ${MAX_IMAGES}장까지만 선택 가능합니다.`;
+    document.getElementById('fileInput').value = ''; // 파일 입력 필드 초기화
+    selectedFiles = []; // 선택된 파일 배열도 초기화
+    uploadedCount = 0; // 카운트 초기화
+    updateButtonStates(); // 버튼 상태 업데이트
+    updateCountsDisplay(); // 카운트 디스플레이 업데이트
+    return;
+  }
+
+  // 파일 타입 체크 (이미지 파일만 허용)
+  let ok = selectedFiles.every(f => f.type.startsWith('image/'));
+  if (!ok) {
+    document.getElementById('errMsg').textContent = '이미지(JPG, JPEG, PNG) 파일만 선택하세요.';
+    document.getElementById('fileInput').value = ''; // 파일 입력 필드 초기화
+    selectedFiles = []; // 선택된 파일 배열도 초기화
+    uploadedCount = 0; // 카운트 초기화
+    updateButtonStates(); // 버튼 상태 업데이트
+    updateCountsDisplay(); // 카운트 디스플레이 업데이트
+    return;
+  }
+
+  renderInitialPreviews(); // 선택된 파일들을 미리보기 영역에 원본으로 렌더링
+}
+
+// 버튼들의 활성화/비활성화 상태를 업데이트하는 함수
+function updateButtonStates() {
+  const processBtn = document.getElementById('processBtn');
+  const clearAllBtn = document.getElementById('clearAllBtn');
+  const downloadAllBtn = document.getElementById('downloadAllBtn');
+  const downloadZipBtn = document.getElementById('downloadZipBtn');
+
+  processBtn.disabled = selectedFiles.length === 0; // 선택된 파일이 없으면 비활성화
+  clearAllBtn.disabled = selectedFiles.length === 0; // 선택된 파일이 없으면 비활성화
+  // '모두 다운로드'와 '모두 ZIP으로 다운로드' 버튼은 크롭된 캔버스가 있을 때만 활성화
+  downloadAllBtn.disabled = processedCanvases.length === 0;
+  downloadZipBtn.disabled = processedCanvases.length === 0;
+}
+
+// 이미지 카운트 디스플레이를 업데이트하는 함수
+function updateCountsDisplay() {
+  document.getElementById('uploadedCountDisplay').textContent = uploadedCount;
+  document.getElementById('convertedCountDisplay').textContent = convertedCount;
+}
+
+// 초기 파일 선택 시 원본 이미지를 미리보기 영역에 렌더링하는 함수
+function renderInitialPreviews() {
+  const previewWrap = document.getElementById('previewWrap');
+  previewWrap.innerHTML = ''; // 기존 미리보기 초기화
+  processedCanvases = []; // 초기화 시 processedCanvases도 초기화
+  convertedCount = 0; // 초기 미리보기 렌더링 시 convertedCount도 초기화
+  updateCountsDisplay(); // 카운트 디스플레이 업데이트
+
+  selectedFiles.forEach((file, index) => {
+    const reader = new FileReader();
+
+    reader.onload = function(evt) {
+      const img = new Image();
+      img.onload = function() {
+        const box = document.createElement('div');
+        box.className = 'preview-box bg-white rounded-xl shadow-md p-4';
+        box.setAttribute('data-index', index); // 파일을 식별하기 위한 인덱스 저장
+
+        const tit = document.createElement('div');
+        tit.className = 'preview-title text-gray-600 text-sm mb-2';
+        tit.textContent = `${file.name} (원본)`; // 초기에는 원본 크기로 표시
+
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+
+        // 원본 이미지를 캔버스에 그려서 미리보기 (UI가 너무 커지지 않도록 크기 조정)
+        const maxWidth = 240;
+        const maxHeight = 135; // 16:9 비율 유지
+        let width = img.width;
+        let height = img.height;
+
+        if (width > maxWidth || height > maxHeight) {
+          const ratio = Math.min(maxWidth / width, maxHeight / height);
+          width *= ratio;
+          height *= ratio;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        ctx.drawImage(img, 0, 0, width, height);
+
+        // 삭제 버튼 추가
+        const deleteBtn = document.createElement('button');
+        deleteBtn.textContent = 'X';
+        deleteBtn.className = 'delete-btn';
+        deleteBtn.onclick = function() {
+          deleteFile(index);
+        };
+
+        box.appendChild(deleteBtn);
+        box.appendChild(tit);
+        box.appendChild(canvas);
+        
+        previewWrap.appendChild(box);
+      };
+      img.onerror = function() {
+        const box = document.createElement('div');
+        box.className = 'preview-box bg-white rounded-xl shadow-md p-4';
+        box.setAttribute('data-index', index);
+        box.innerHTML = `<div class="preview-title text-gray-600 text-sm mb-2">${file.name}</div><span class="text-red-500 font-medium">이미지 읽기 실패</span>`;
+        previewWrap.appendChild(box);
+      };
+      img.src = evt.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+// 파일 삭제 함수 (개별 이미지)
+function deleteFile(indexToDelete) {
+  // selectedFiles 배열에서 해당 인덱스의 파일 제거
+  selectedFiles = selectedFiles.filter((_, index) => index !== indexToDelete);
+  
+  // processedCanvases 배열도 동기화 (재처리 없이 바로 반영하기 위해)
+  processedCanvases = processedCanvases.filter((_, index) => index !== indexToDelete);
+
+  // 파일 입력 필드 동기화 (깔끔한 상태 유지를 위해)
+  const dataTransfer = new DataTransfer();
+  selectedFiles.forEach(file => dataTransfer.items.add(file));
+  document.getElementById('fileInput').files = dataTransfer.files;
+
+  uploadedCount = selectedFiles.length; // 업로드된 이미지 개수 업데이트
+  convertedCount = processedCanvases.length; // 변환 완료 이미지 개수 업데이트
+
+  renderInitialPreviews(); // 원본 미리보기를 다시 렌더링
+  updateButtonStates(); // 버튼 상태 업데이트
+  updateCountsDisplay(); // 카운트 디스플레이 업데이트
+}
+
+// 모든 이미지 삭제 함수
+function clearAllFiles() {
+  selectedFiles = []; // 모든 파일 제거
+  processedCanvases = []; // 모든 크롭된 캔버스 제거
+  uploadedCount = 0; // 카운트 초기화
+  convertedCount = 0; // 카운트 초기화
+
+  document.getElementById('fileInput').value = ''; // 파일 입력 필드 초기화
+  document.getElementById('previewWrap').innerHTML = ''; // 미리보기 영역 비우기
+  document.getElementById('errMsg').textContent = ''; // 에러 메시지 비우기
+  
+  updateButtonStates(); // 버튼 상태 업데이트
+  updateCountsDisplay(); // 카운트 디스플레이 업데이트
+}
+
+// 모든 크롭된 이미지를 한 번에 다운로드하는 함수 (개별 다운로드)
+function downloadAllFiles() {
+  if (processedCanvases.length === 0) {
+    showCustomMessageBox('다운로드할 크롭된 이미지가 없습니다. 먼저 "16:9로 모두 크롭하기" 버튼을 클릭해주세요.');
+    return;
+  }
+
+  processedCanvases.forEach((item) => {
+    const url = item.canvas.toDataURL('image/jpeg', 0.9);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${item.originalFileName.replace(/\.[^/.]+$/, "")}_16x9.jpg`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  });
+}
+
+// 모든 크롭된 이미지를 ZIP 파일로 다운로드하는 함수
+function downloadAllAsZip() {
+  if (processedCanvases.length === 0) {
+    showCustomMessageBox('ZIP 파일로 만들 크롭된 이미지가 없습니다. 먼저 "16:9로 모두 크롭하기" 버튼을 클릭해주세요.');
+    return;
+  }
+
+  const zip = new JSZip();
+  let filesProcessedForZip = 0; // ZIP 처리가 완료된 파일 수
+  const totalFilesToZip = processedCanvases.length;
+  document.getElementById('loadingIndicator').style.display = 'block'; // 로딩 표시기 활성화
+
+  processedCanvases.forEach((item) => {
+    // 캔버스 데이터를 JPEG base64로 가져옴 (data:image/jpeg;base64,...)
+    const dataURL = item.canvas.toDataURL('image/jpeg', 0.9);
+    // 'data:image/jpeg;base64,' 부분을 제거하고 실제 base64 데이터만 남김
+    const base64Data = dataURL.split(',')[1];
+    
+    // 파일 이름 정리
+    const fileName = `${item.originalFileName.replace(/\.[^/.]+$/, "")}_16x9.jpg`;
+    zip.file(fileName, base64Data, { base64: true });
+    filesProcessedForZip++;
+
+    if (filesProcessedForZip === totalFilesToZip) {
+      // 모든 파일이 ZIP에 추가되면 ZIP 파일 생성 및 다운로드
+      zip.generateAsync({ type: "blob" })
+        .then(function(content) {
+          // FileSaver.js 같은 라이브러리를 사용하지 않고 직접 다운로드
+          const link = document.createElement('a');
+          link.href = URL.createObjectURL(content);
+          link.download = `cropped_images_${new Date().getTime()}.zip`; // 고유한 ZIP 파일 이름
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(link.href); // URL 해제
+
+          document.getElementById('loadingIndicator').style.display = 'none'; // 로딩 표시기 비활성화
+        })
+        .catch(function(error) {
+          console.error("ZIP 파일 생성 중 오류 발생:", error);
+          showCustomMessageBox('ZIP 파일 생성 중 오류가 발생했습니다.');
+          document.getElementById('loadingIndicator').style.display = 'none'; // 로딩 표시기 비활성화
+        });
+    }
+  });
+}
+
+
+// 커스텀 메시지 박스 표시 함수
+function showCustomMessageBox(message) {
+  const msgBox = document.createElement('div');
+  msgBox.className = 'fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50';
+  msgBox.innerHTML = `
+    <div class="bg-white p-6 rounded-lg shadow-xl text-center">
+      <p class="text-gray-800 mb-4">${message}</p>
+      <button class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg" onclick="this.parentNode.parentNode.remove()">확인</button>
+    </div>
+  `;
+  document.body.appendChild(msgBox);
+}
+
+
+// 파일 입력 필드 변경 이벤트 리스너
+document.getElementById('fileInput').addEventListener('change', (e) => {
+  handleFiles(e.target.files); // 공통 함수 호출
+});
+
+// 드래그 앤 드롭 영역에 대한 참조
+const fileZone = document.getElementById('fileZone');
+
+// 드래그 오버 시 기본 동작 방지 및 하이라이트
+fileZone.addEventListener('dragover', (e) => {
+  e.preventDefault(); // 드래그 오버 시 기본 동작(링크 열기 등) 방지
+  fileZone.classList.add('highlight'); // 시각적 피드백을 위해 하이라이트 클래스 추가
+});
+
+// 드래그 영역을 벗어났을 때 하이라이트 제거
+fileZone.addEventListener('dragleave', (e) => {
+  fileZone.classList.remove('highlight'); // 하이라이트 클래스 제거
+});
+
+// 파일 드롭 시 처리
+fileZone.addEventListener('drop', (e) => {
+  e.preventDefault(); // 드롭 시 기본 동작 방지
+  fileZone.classList.remove('highlight'); // 하이라이트 클래스 제거
+  const droppedFiles = e.dataTransfer.files; // 드롭된 파일들 가져오기
+  handleFiles(droppedFiles); // 공통 함수 호출
+  // 드롭된 파일들을 fileInput에도 반영하여 UI 동기화
+  document.getElementById('fileInput').files = droppedFiles;
+});
+
+// '모두 지우기' 버튼 이벤트 리스너
+document.getElementById('clearAllBtn').addEventListener('click', clearAllFiles);
+
+// '모두 다운로드' 버튼 이벤트 리스너
+document.getElementById('downloadAllBtn').addEventListener('click', downloadAllFiles);
+
+// '모두 ZIP으로 다운로드' 버튼 이벤트 리스너
+document.getElementById('downloadZipBtn').addEventListener('click', downloadAllAsZip);
+
+
+document.getElementById('processBtn').addEventListener('click', () => {
+  if (selectedFiles.length === 0) return; // 선택된 파일이 없으면 함수 종료
+
+  document.getElementById('previewWrap').innerHTML = ''; // 미리보기 영역 다시 비우기
+  processedCanvases = []; // 새 크롭 작업 시작 전 초기화
+  convertedCount = 0; // 변환 완료 카운트 초기화
+
+  document.getElementById('loadingIndicator').style.display = 'block'; // 로딩 표시기 활성화
+
+  let completedProcesses = 0; // 모든 이미지 처리 완료 여부 확인용
+
+  selectedFiles.forEach((file, index) => {
+    const reader = new FileReader();
+
+    reader.onload = function(evt) {
+      const img = new Image();
+
+      img.onload = function() {
+        // 16:9 비율로 이미지 크롭 로직
+        const targetRatio = 16 / 9;
+        let w = img.width, h = img.height;
+        let sw, sh, sx, sy;
+
+        if (w / h > targetRatio) {
+          sh = h;
+          sw = h * targetRatio;
+          sx = Math.floor((w - sw) / 2);
+          sy = 0;
+        } else {
+          sw = w;
+          sh = w / targetRatio;
+          sx = 0;
+          sy = Math.floor((h - sh) / 2);
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = sw;
+        canvas.height = sh;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+
+        // 크롭된 캔버스를 processedCanvases 배열에 저장
+        processedCanvases.push({
+            canvas: canvas,
+            originalFileName: file.name
+        });
+        convertedCount++; // 성공적으로 변환 완료 시 카운트 증가
+        updateCountsDisplay(); // 카운트 디스플레이 업데이트
+
+        // 미리보기 및 다운로드 버튼 UI 생성
+        const box = document.createElement('div');
+        box.className = 'preview-box bg-white rounded-xl shadow-md p-4';
+        box.setAttribute('data-index', index);
+
+        const tit = document.createElement('div');
+        tit.className = 'preview-title text-gray-600 text-sm mb-2';
+        tit.textContent = `${file.name} (${sw}x${sh})`;
+        box.appendChild(tit);
+        box.appendChild(canvas);
+
+        const btn = document.createElement('button');
+        btn.textContent = '다운로드';
+        btn.className = 'bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg shadow-md transition-all duration-200 mt-3';
+        
+        btn.onclick = function() {
+          const url = canvas.toDataURL('image/jpeg', 0.9);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `${file.name.replace(/\.[^/.]+$/, "")}_16x9.jpg`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        };
+        box.appendChild(btn);
+
+        // 삭제 버튼 추가
+        const deleteBtn = document.createElement('button');
+        deleteBtn.textContent = 'X';
+        deleteBtn.className = 'delete-btn';
+        deleteBtn.onclick = function() {
+          deleteFile(index);
+        };
+        box.appendChild(deleteBtn);
+
+        document.getElementById('previewWrap').appendChild(box);
+
+        completedProcesses++;
+        if (completedProcesses === selectedFiles.length) {
+          // 모든 이미지 처리가 완료되면 로딩 표시기 비활성화 및 버튼 상태 업데이트
+          document.getElementById('loadingIndicator').style.display = 'none';
+          updateButtonStates();
+        }
+      };
+
+      img.onerror = function() {
+        const box = document.createElement('div');
+        box.className = 'preview-box bg-white rounded-xl shadow-md p-4';
+        box.setAttribute('data-index', index);
+        box.innerHTML = `<div class="preview-title text-gray-600 text-sm mb-2">${file.name}</div><span class="text-red-500 font-medium">이미지 읽기 실패</span>`;
+        
+        const deleteBtn = document.createElement('button');
+        deleteBtn.textContent = 'X';
+        deleteBtn.className = 'delete-btn';
+        deleteBtn.onclick = function() {
+          deleteFile(index);
+        };
+        box.appendChild(deleteBtn);
+
+        document.getElementById('previewWrap').appendChild(box);
+
+        completedProcesses++;
+        if (completedProcesses === selectedFiles.length) {
+          // 모든 이미지 처리가 완료되면 로딩 표시기 비활성화 및 버튼 상태 업데이트
+          document.getElementById('loadingIndicator').style.display = 'none';
+          updateButtonStates();
+        }
+      };
+
+      img.src = evt.target.result;
+    }
+    reader.readAsDataURL(file);
+  });
+});
+
+// 페이지 로드 시 초기 버튼 및 카운트 상태 설정
+document.addEventListener('DOMContentLoaded', () => {
+    updateButtonStates();
+    updateCountsDisplay();
+});
+</script>
+</body>
+</html>
